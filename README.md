@@ -54,7 +54,10 @@ struct ProfileState: Equatable {
 }
 
 // 2. Create a Store
-final class ProfileStore: BaseViewStore<ProfileIntent, ProfileEffect, ProfileMutation, ProfileState> {
+final class ProfileStore: BaseViewStore<ProfileIntent, ProfileMutation, ProfileEffect, ProfileState> {
+    init() {
+        super.init(initialState: ProfileState())
+    }
     
     override func mutate(intent: ProfileIntent) -> AnyPublisher<ProfileMutation, Never> {
         switch intent {
@@ -63,8 +66,8 @@ final class ProfileStore: BaseViewStore<ProfileIntent, ProfileEffect, ProfileMut
             let endLoading = Just(ProfileMutation.setLoading(false)).eraseToAnyPublisher()
             
             let fetchTask = performTask(
-                taskID: "fetchUser", 
-                fallbackValue: nil,
+                taskID: "fetchUser", // It can be omitted if it is extracted into a separate function.
+                fallbackValue: nil, // or .setLoading(false)
                 catchHandler: { [weak self] error in
                     self?.effectSubject.send(.showErrorToast(error.localizedDescription))
                 }
@@ -82,30 +85,33 @@ final class ProfileStore: BaseViewStore<ProfileIntent, ProfileEffect, ProfileMut
     
     override func reduce(state: ProfileState, mutation: ProfileMutation) -> ProfileState {
         var newState = state
+        
         switch mutation {
         case .setUserName(let name):
             newState.userName = name
         case .setLoading(let isLoading):
             newState.isLoading = isLoading
         }
+        
         return newState
     }
 }
 
-// 3. Connect to View with WithViewStore & Handle Effects
+// 3. Scope Store State and Connect to View
 struct ProfileView: View {
-    @StateObject private var store = ProfileStore(initialState: ProfileState())
+    @StateObject private var store = ProfileStore()
     @State private var isHovered = false // You can put it in the State, or you can also place it here.
     
     var body: some View {
-        WithViewStore(store) { state in
+        withScopedViewStore(store, observe: (\.userName, \.isLoading)) { userName, isLoading in
             VStack {
-                Text("Hello, \(state.userName)")
+                Text("Hello, \(userName)")
                     .foregroundColor(isHovered ? .blue : .black)
                 
                 Button("Refresh") {
                     store.send(.refreshTapped)
                 }
+                .disabled(isLoading)
             }
         }
         .onReceive(store.effectStream) { effect in
@@ -133,9 +139,9 @@ Handling `async/await` within Combine pipelines can be tricky. Biskit provides `
 ```swift
 let fetchTask = performTask(
     taskID: "fetch_user_task", // Auto-cancels previous ongoing tasks with this ID
-    retryCount: 3,             // Automatically retries up to 3 times on failure
-    retryDelay: 1.0,           // Waits 1 second between retry attempts
-    fallbackValue: nil,        // Failsafe mutation if an error is thrown
+    retryCount: 3,             // Retry up to 3 times after the initial attempt (total 4)
+    retryDelay: 1.0,           // Wait 1 second before each retry
+    fallbackValue: nil,        // Emit no mutation when the task ultimately fails
     catchHandler: { [weak self] error in
         // Easily route errors to one-off Effects
         self?.effectSubject.send(.showErrorToast(error.localizedDescription))
@@ -209,7 +215,7 @@ struct MyState: Equatable {
     var title: String
     
     @DiffIgnored
-    var internalCache: [String: Any] = [:] 
+    fileprivate var internalCache: [String: Any] = [:] 
     // Changes to internalCache will bypass Equatable check and prevent unnecessary rendering.
 }
 ```
@@ -219,7 +225,7 @@ struct MyState: Equatable {
 ## Requirements
 
 - iOS 14.0+ / macOS 11.0+
-- Swift 5.5+ (Swift Concurrency support)
+- Swift 6.2+ (Swift Concurrency support)
 
 ---
 
