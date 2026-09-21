@@ -99,7 +99,7 @@ extension BaseViewStore {
         operation: @escaping () async throws -> Mutation
     ) -> AnyPublisher<Mutation, Never> {
         var currentAttemptCount = 0
-        return Deferred {
+        return Deferred { [weak self] in
             Future<Mutation?, Error> { [weak self] promise in
                 guard let self else {
                     promise(.success(fallbackValue))
@@ -131,7 +131,7 @@ extension BaseViewStore {
                 self.tasks[taskID] = AnyCancellable { task.cancel() }
             }
         }
-        .retry(retryCount)
+        .retryIfNeeded(retryCount)
         .receive(on: DispatchQueue.main)
         .catch { error in
             catchHandler?(error)
@@ -139,5 +139,11 @@ extension BaseViewStore {
         }
         .compactMap { $0 }
         .eraseToAnyPublisher()
+    }
+}
+
+extension Publisher {
+    fileprivate func retryIfNeeded(_ retries: Int) -> AnyPublisher<Output, Failure> {
+        retries > 0 ? retry(retries).eraseToAnyPublisher() : eraseToAnyPublisher()
     }
 }
